@@ -11,7 +11,6 @@ using OFT.Rendering.Context;
 using OFT.Rendering.Settings;
 using Utils.Common.Logging;
 using Color = System.Drawing.Color;
-using static ATAS.Indicators.Technical.SwingHighLow;
 
 [DisplayName("Swing High Low")]
 [Description("Template implementation")]
