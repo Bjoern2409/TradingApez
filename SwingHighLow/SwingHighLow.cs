@@ -12,8 +12,9 @@ using OFT.Rendering.Settings;
 using Utils.Common.Logging;
 using Color = System.Drawing.Color;
 
+[Category("TradingApez")]
 [DisplayName("Swing High Low")]
-[Description("Template implementation")]
+[Description("Swing High/Low indicator")]
 public class SwingHighLow : Indicator
 {
     #region Nested Types
@@ -159,11 +160,7 @@ public class SwingHighLow : Indicator
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
-        var swingHighSignals = swingSignals.Where(signal => signal.SignalType == Swing.High).ToList();
-        DrawSwingLine(context, swingHighSignals, swingHighColorTransp, swingHighColor);
-
-        var swingLowSignals = swingSignals.Where(signal => signal.SignalType == Swing.Low).ToList();
-        DrawSwingLine(context, swingLowSignals, swingLowColorTransp, swingLowColor);
+        DrawSwingLines(context, swingSignals);
     }
 
     #endregion
@@ -239,7 +236,7 @@ public class SwingHighLow : Indicator
             swingSignals.RemoveAll(s => s.EndBar == bar);
     }
 
-    private void DrawSwingLine(RenderContext context, List<Signal> swingSignals, Color color, PenSettings penSet)
+    private void DrawSwingLines(RenderContext context, List<Signal> swingSignals)
     {
         if (ChartInfo is null)
             return;
@@ -256,6 +253,9 @@ public class SwingHighLow : Indicator
             var w = x2 - x;
             var h = ChartInfo.GetYByPrice(signal.PriceLevel, false) - y;
             var rec = new Rectangle(x, y, w, h);
+
+            var color = signal.SignalType == Swing.High ? swingHighColorTransp : swingLowColorTransp;
+            var penSet = signal.SignalType == Swing.High ? swingHighColor : swingLowColor;
             context.DrawFillRectangle(penSet.RenderObject, color, rec);
         }
     }
