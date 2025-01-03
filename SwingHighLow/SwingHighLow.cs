@@ -11,8 +11,6 @@ using OFT.Rendering.Context;
 using OFT.Rendering.Settings;
 using Color = System.Drawing.Color;
 using System.Text.RegularExpressions;
-using Microsoft.VisualBasic;
-using Utils.Common.Logging;
 
 [Category("TradingApez")]
 [DisplayName("Swing High Low")]
