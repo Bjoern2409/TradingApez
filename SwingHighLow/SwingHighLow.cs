@@ -196,8 +196,7 @@ public class SwingHighLow : Indicator
 
     private readonly PenSettings swingHighColor = new() { Color = DefaultColors.Green.Convert() };
     private readonly PenSettings swingLowColor = new() { Color = DefaultColors.Red.Convert() };
-
-    internal readonly List<Signal> swingSignals = [];
+    private readonly List<Signal> swingSignals = [];
 
     #endregion
 
