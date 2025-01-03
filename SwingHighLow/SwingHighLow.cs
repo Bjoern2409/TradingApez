@@ -2,15 +2,15 @@
 
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Drawing;
+using System.Linq;
+using System.Text.RegularExpressions;
 using ATAS.Indicators.Drawing;
 using OFT.Rendering.Context;
 using OFT.Rendering.Settings;
 using Color = System.Drawing.Color;
-using Utils.Common.Logging;
 
 [Category("TradingApez")]
 [DisplayName("Swing High Low")]
@@ -179,17 +179,17 @@ public class SwingHighLow : Indicator
     private int swingPeriod = 2;
     private int lookbackPeriod = 100;
     private int transparency = 5;
+    private int secondsPerCandle;
+    private Color swingColorTransp;
 
-    private Color swingHighColorTransp;
-    private Color swingLowColorTransp;
-
-    private readonly PenSettings swingHighColor = new() { Color = DefaultColors.Green.Convert() };
-    private readonly PenSettings swingLowColor = new() { Color = DefaultColors.Red.Convert() };
+    private readonly PenSettings swingColor = new() { Color = DefaultColors.Black.Convert() };
     private readonly List<Signal> swingSignals = [];
 
     #endregion
 
     #region Settings Properties
+
+    public int BarIndex = 0;
 
     [Display(GroupName = "Settings", Name = "Time Frame", Description = "")]
     public TimeFrameScale Timeframe
@@ -237,30 +237,18 @@ public class SwingHighLow : Indicator
         set
         {
             transparency = value;
-            swingHighColorTransp = GetColorTransparency(swingHighColor.Color.Convert(), transparency);
-            swingLowColorTransp = GetColorTransparency(swingLowColor.Color.Convert(), transparency);
+            swingColorTransp = GetColorTransparency(swingColor.Color.Convert(), transparency);
         }
     }
 
-    [Display(GroupName = "Drawing", Name = "Swing High Color", Description = "")]
-    public Color SwingHighColor
+    [Display(GroupName = "Drawing", Name = "Level Color", Description = "")]
+    public Color SwingColor
     {
-        get => swingHighColor.Color.Convert();
+        get => swingColor.Color.Convert();
         set
         {
-            swingHighColor.Color = value.Convert();
-            swingHighColorTransp = GetColorTransparency(swingHighColor.Color.Convert(), transparency);
-        }
-    }
-
-    [Display(GroupName = "Drawing", Name = "Swing Low Color", Description = "")]
-    public Color SwingLowColor
-    {
-        get => swingLowColor.Color.Convert();
-        set
-        {
-            swingLowColor.Color = value.Convert();
-            swingLowColorTransp = GetColorTransparency(swingLowColor.Color.Convert(), transparency);
+            swingColor.Color = value.Convert();
+            swingColorTransp = GetColorTransparency(swingColor.Color.Convert(), transparency);
         }
     }
 
@@ -276,9 +264,7 @@ public class SwingHighLow : Indicator
 
         EnableCustomDrawing = true;
         SubscribeToDrawingEvents(DrawingLayouts.Final);
-
-        swingHighColorTransp = GetColorTransparency(swingHighColor.Color.Convert(), transparency);
-        swingLowColorTransp = GetColorTransparency(swingLowColor.Color.Convert(), transparency);
+        swingColorTransp = GetColorTransparency(swingColor.Color.Convert(), transparency);
     }
 
     #endregion
@@ -287,6 +273,7 @@ public class SwingHighLow : Indicator
 
     protected override void OnRecalculate()
     {
+        GetCandleSeconds();
         timeFrameObj = new(Timeframe, GetCandle);
         swingSignals.Clear();
     }
@@ -307,10 +294,8 @@ public class SwingHighLow : Indicator
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
-        if (timeframe == TimeFrameScale.Chart)
-            DrawSwingLines(context, swingSignals);
-        else
-            DrawSwingLines(context, timeFrameObj.swingSignals);
+        var signales = timeframe == TimeFrameScale.Chart ? swingSignals : timeFrameObj.swingSignals;
+        DrawSwingLines(context, signales, swingColorTransp, swingColor);
     }
 
     #endregion
@@ -319,6 +304,9 @@ public class SwingHighLow : Indicator
 
     private void TimeFrameSwings(int bar)
     {
+        if (secondsPerCandle > timeFrameObj.SecondsPerTframe)
+            return;
+
         timeFrameObj.AddBar(bar);
 
         if (!timeFrameObj.IsNewPeriod || timeFrameObj.Count <= 2 * swingPeriod)
@@ -348,10 +336,12 @@ public class SwingHighLow : Indicator
                 break;
         }
 
+        var numberBars = (timeFrameObj.SecondsPerTframe / 60) * swingPeriod - 1;
+
         if (isSwingHigh)
-            AddNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
+            AddNewLevel(timeFrameObj.swingSignals, centerCandle.HighBar, centerCandle.High, SwingType.High);
         if (isSwingLow)
-            AddNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
+            AddNewLevel(timeFrameObj.swingSignals, centerCandle.LowBar, centerCandle.Low, SwingType.Low);
     }
 
     private void CurrentChartSwings(int bar)
@@ -403,6 +393,7 @@ public class SwingHighLow : Indicator
 
     private void CheckLevelBreak(List<Signal> swingSignals, int bar)
     {
+        var endBar = bar + 1;
         var candle = GetCandle(bar);
 
         foreach (var signal in swingSignals)
@@ -411,15 +402,15 @@ public class SwingHighLow : Indicator
                 continue;
 
             if (signal.SignalType == SwingType.High && candle.High >= signal.PriceLevel)
-                signal.EndBar = bar;
+                signal.EndBar = endBar;
             else if (signal.SignalType == SwingType.Low && candle.Low <= signal.PriceLevel)
-                signal.EndBar = bar;
+                signal.EndBar = endBar;
         }
 
         swingSignals.RemoveAll(s => bar - s.StartBar > lookbackPeriod);
     }
 
-    private void DrawSwingLines(RenderContext context, List<Signal> swingSignals)
+    private void DrawSwingLines(RenderContext context, List<Signal> swingSignals, Color color, PenSettings penSet)
     {
         if (ChartInfo is null)
             return;
@@ -439,10 +430,62 @@ public class SwingHighLow : Indicator
             var w = x2 - x;
             var h = ChartInfo.GetYByPrice(signal.PriceLevel, false) - y;
             var rec = new Rectangle(x, y, w, h);
-
-            var color = signal.SignalType == SwingType.High ? swingHighColorTransp : swingLowColorTransp;
-            var penSet = signal.SignalType == SwingType.High ? swingHighColor : swingLowColor;
             context.DrawFillRectangle(penSet.RenderObject, color, rec);
+        }
+    }
+
+    private void GetCandleSeconds()
+    {
+        if (ChartInfo is null)
+            return;
+
+        var timeFrame = ChartInfo.TimeFrame;
+
+        if (ChartInfo.ChartType == "Seconds")
+        {
+            secondsPerCandle = ChartInfo.TimeFrame switch
+            {
+                "5" => 5,
+                "10" => 10,
+                "15" => 15,
+                "30" => 30,
+                _ => 0
+            };
+
+            if (secondsPerCandle == 0)
+            {
+                if (int.TryParse(Regex.Match(timeFrame, @"\d{1,}$").Value, out var periodSec))
+                {
+                    secondsPerCandle = periodSec;
+                    return;
+                }
+            }
+        }
+
+        if (ChartInfo.ChartType != "TimeFrame")
+            return;
+
+        secondsPerCandle = ChartInfo.TimeFrame switch
+        {
+            "M1" => 60 * (int)TimeFrameScale.M1,
+            "M5" => 60 * (int)TimeFrameScale.M5,
+            "M15" => 60 * (int)TimeFrameScale.M15,
+            "M30" => 60 * (int)TimeFrameScale.M30,
+            "H1" => 60 * (int)TimeFrameScale.H1,
+            "H4" => 60 * (int)TimeFrameScale.H4,
+            _ => 0
+        };
+
+        if (secondsPerCandle != 0)
+            return;
+
+        if (!int.TryParse(Regex.Match(timeFrame, @"\d{1,}$").Value, out var period))
+            return;
+
+        if (timeFrame.Contains('M'))
+        {
+            secondsPerCandle = 60 * (int)TimeFrameScale.M1 * period;
+            return;
         }
     }
 
