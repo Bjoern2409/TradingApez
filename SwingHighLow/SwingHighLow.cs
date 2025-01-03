@@ -200,7 +200,7 @@ public class SwingHighLow : Indicator
 
     #endregion
 
-    #region Properties
+    #region Settings Properties
 
     [Display(GroupName = "Settings", Name = "Time Frame", Description = "")]
     public TimeFrameScale Timeframe
@@ -308,11 +308,11 @@ public class SwingHighLow : Indicator
         if (isFixedTimeFrame)
         {
             TimeFrameSwings(bar);
-            TryCloseLine(timeFrameObj.swingSignals, bar);
+            CheckLevelBreak(timeFrameObj.swingSignals, bar);
         }
 
         CurrentChartSwings(bar);
-        TryCloseLine(swingSignals, bar);
+        CheckLevelBreak(swingSignals, bar);
     }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
@@ -357,9 +357,9 @@ public class SwingHighLow : Indicator
         }
 
         if (isSwingHigh)
-            CreateNewLine(swingSignals, bar - swingPeriod, centerCandle.High, SwingType.High);
+            CreateNewLevel(swingSignals, bar - swingPeriod, centerCandle.High, SwingType.High);
         if (isSwingLow)
-            CreateNewLine(swingSignals, bar - swingPeriod, centerCandle.Low, SwingType.Low);
+            CreateNewLevel(swingSignals, bar - swingPeriod, centerCandle.Low, SwingType.Low);
     }
 
     private void TimeFrameSwings(int bar)
@@ -397,12 +397,12 @@ public class SwingHighLow : Indicator
         }
 
         if (isSwingHigh)
-            CreateNewLine(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
+            CreateNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
         if (isSwingLow)
-            CreateNewLine(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
+            CreateNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
     }
 
-    private void CreateNewLine(List<Signal> swingSignals, int bar, decimal priceLevel, SwingType swingType)
+    private void CreateNewLevel(List<Signal> swingSignals, int bar, decimal priceLevel, SwingType swingType)
     {
         var signal = new Signal()
         {
@@ -414,7 +414,7 @@ public class SwingHighLow : Indicator
         swingSignals.Add(signal);
     }
 
-    private void TryCloseLine(List<Signal> swingSignals, int bar)
+    private void CheckLevelBreak(List<Signal> swingSignals, int bar)
     {
         var candle = GetCandle(bar);
 
