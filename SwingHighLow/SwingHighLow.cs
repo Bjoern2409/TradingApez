@@ -11,6 +11,7 @@ using OFT.Rendering.Context;
 using OFT.Rendering.Settings;
 using Color = System.Drawing.Color;
 using System.Text.RegularExpressions;
+using Utils.Common.Logging;
 
 [Category("TradingApez")]
 [DisplayName("Swing High Low")]
@@ -27,8 +28,7 @@ public class SwingHighLow : Indicator
         M15 = 15,
         M30 = 30,
         H1 = 60,
-        H4 = 240,
-        Daily = 1440
+        H4 = 240
     }
 
     public enum SwingType
@@ -90,17 +90,16 @@ public class SwingHighLow : Indicator
                 volume += curBarVolume;
 
             curBarVolume = candle.Volume;
-
             lastBar = bar;
         }
     }
 
     internal class TimeFrameObj
     {
-        private readonly List<TFPeriod> periods = new();
         private readonly TimeFrameScale timeframe;
         private readonly int secondsPerTframe;
-        private readonly Func<int, bool> IsNewSession;
+
+        private readonly List<TFPeriod> periods = [];
         private readonly Func<int, IndicatorCandle> GetCandle;
 
         internal readonly List<Signal> swingSignals = [];
@@ -116,11 +115,10 @@ public class SwingHighLow : Indicator
         internal bool IsNewPeriod => isNewPeriod;
         internal int SecondsPerTframe => secondsPerTframe;
 
-        internal TimeFrameObj(TimeFrameScale timeFrame, Func<int, bool> isNewSession, Func<int, IndicatorCandle> getCandle)
+        internal TimeFrameObj(TimeFrameScale timeFrame, Func<int, IndicatorCandle> getCandle)
         {
             timeframe = timeFrame;
             secondsPerTframe = 60 * (int)timeFrame;
-            IsNewSession = isNewSession;
             GetCandle = getCandle;
         }
 
@@ -136,12 +134,6 @@ public class SwingHighLow : Indicator
             var isNewBar = false;
             var isCustomPeriod = false;
             var endBar = periods.Last().EndBar;
-
-            if (timeframe == TimeFrameScale.Daily)
-            {
-                isCustomPeriod = true;
-                isNewBar = IsNewSession(bar);
-            }
 
             if (isNewBar || !isCustomPeriod && (beginTime >= GetCandle(endBar).LastTime))
             {
@@ -185,11 +177,9 @@ public class SwingHighLow : Indicator
     private TimeFrameScale timeframe;
     private TimeFrameObj timeFrameObj;
 
-    private bool isFixedTimeFrame;
     private int swingPeriod = 2;
     private int lookbackPeriod = 100;
     private int transparency = 5;
-    private int secondsPerCandle;
 
     private Color swingHighColorTransp;
     private Color swingLowColorTransp;
@@ -298,34 +288,72 @@ public class SwingHighLow : Indicator
 
     protected override void OnRecalculate()
     {
-        GetCandleSeconds();
-        timeFrameObj = new(Timeframe, IsNewSession, GetCandle);
+        timeFrameObj = new(Timeframe, GetCandle);
         swingSignals.Clear();
     }
 
     protected override void OnCalculate(int bar, decimal value)
     {
-        if (isFixedTimeFrame)
+        if (timeframe != TimeFrameScale.Chart)
         {
             TimeFrameSwings(bar);
             CheckLevelBreak(timeFrameObj.swingSignals, bar);
         }
-
-        CurrentChartSwings(bar);
-        CheckLevelBreak(swingSignals, bar);
+        else
+        {
+            CurrentChartSwings(bar);
+            CheckLevelBreak(swingSignals, bar);
+        }
     }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
         if (timeframe == TimeFrameScale.Chart)
             DrawSwingLines(context, swingSignals);
-        else        
-            DrawSwingLines(context, timeFrameObj.swingSignals);        
+        else
+            DrawSwingLines(context, timeFrameObj.swingSignals);
     }
 
     #endregion
 
     #region Private Methods
+
+    private void TimeFrameSwings(int bar)
+    {
+        timeFrameObj.AddBar(bar);
+
+        if (!timeFrameObj.IsNewPeriod || timeFrameObj.Count <= 2 * swingPeriod)
+            return;
+
+        bool isSwingHigh = true;
+        bool isSwingLow = true;
+
+        var centerIndex = swingPeriod;
+        var centerCandle = timeFrameObj[centerIndex];
+
+        for (int i = 1; i <= swingPeriod; i++)
+        {
+            var prevCandle = timeFrameObj[centerIndex - i];
+            var nextCandle = timeFrameObj[centerIndex + i];
+
+            // Check swing high conditions
+            if (centerCandle.High < prevCandle.High || centerCandle.High < nextCandle.High)
+                isSwingHigh = false;
+
+            // Check swing low conditions
+            if (centerCandle.Low > prevCandle.Low || centerCandle.Low > nextCandle.Low)
+                isSwingLow = false;
+
+            // Early termination if both are false
+            if (!isSwingHigh && !isSwingLow)
+                break;
+        }
+
+        if (isSwingHigh)
+            AddNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
+        if (isSwingLow)
+            AddNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
+    }
 
     private void CurrentChartSwings(int bar)
     {
@@ -357,52 +385,12 @@ public class SwingHighLow : Indicator
         }
 
         if (isSwingHigh)
-            CreateNewLevel(swingSignals, bar - swingPeriod, centerCandle.High, SwingType.High);
+            AddNewLevel(swingSignals, bar - swingPeriod, centerCandle.High, SwingType.High);
         if (isSwingLow)
-            CreateNewLevel(swingSignals, bar - swingPeriod, centerCandle.Low, SwingType.Low);
+            AddNewLevel(swingSignals, bar - swingPeriod, centerCandle.Low, SwingType.Low);
     }
 
-    private void TimeFrameSwings(int bar)
-    {
-        if (secondsPerCandle > timeFrameObj.SecondsPerTframe)
-            return;
-
-        timeFrameObj.AddBar(bar);
-
-        if (!timeFrameObj.IsNewPeriod || timeFrameObj.Count <= 2 * swingPeriod)
-            return;
-
-        bool isSwingHigh = true;
-        bool isSwingLow = true;
-
-        var centerIndex = swingPeriod;
-        var centerCandle = timeFrameObj[centerIndex];
-
-        for (int i = 1; i <= swingPeriod; i++)
-        {
-            var prevCandle = timeFrameObj[centerIndex - i];
-            var nextCandle = timeFrameObj[centerIndex + i];
-
-            // Check swing high conditions
-            if (centerCandle.High < prevCandle.High || centerCandle.High < nextCandle.High)
-                isSwingHigh = false;
-
-            // Check swing low conditions
-            if (centerCandle.Low > prevCandle.Low || centerCandle.Low > nextCandle.Low)
-                isSwingLow = false;
-
-            // Early termination if both are false
-            if (!isSwingHigh && !isSwingLow)
-                break;
-        }
-
-        if (isSwingHigh)
-            CreateNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
-        if (isSwingLow)
-            CreateNewLevel(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
-    }
-
-    private void CreateNewLevel(List<Signal> swingSignals, int bar, decimal priceLevel, SwingType swingType)
+    private void AddNewLevel(List<Signal> swingSignals, int bar, decimal priceLevel, SwingType swingType)
     {
         var signal = new Signal()
         {
@@ -457,75 +445,6 @@ public class SwingHighLow : Indicator
             var penSet = signal.SignalType == SwingType.High ? swingHighColor : swingLowColor;
             context.DrawFillRectangle(penSet.RenderObject, color, rec);
         }
-    }
-
-    private void GetCandleSeconds()
-    {
-        if (ChartInfo is null) 
-            return;
-
-        var timeFrame = ChartInfo.TimeFrame;
-
-        if (ChartInfo.ChartType == "Seconds")
-        {
-            isFixedTimeFrame = true;
-
-            secondsPerCandle = ChartInfo.TimeFrame switch
-            {
-                "5" => 5,
-                "10" => 10,
-                "15" => 15,
-                "30" => 30,
-                _ => 0
-            };
-
-            if (secondsPerCandle == 0)
-            {
-                if (int.TryParse(Regex.Match(timeFrame, @"\d{1,}$").Value, out var periodSec))
-                {
-                    secondsPerCandle = periodSec;
-                    return;
-                }
-            }
-        }
-
-        if (ChartInfo.ChartType != "TimeFrame")
-            return;
-
-        isFixedTimeFrame = true;
-
-        secondsPerCandle = ChartInfo.TimeFrame switch
-        {
-            "M1" => 60 * (int)TimeFrameScale.M1,
-            "M5" => 60 * (int)TimeFrameScale.M5,
-            "M15" => 60 * (int)TimeFrameScale.M15,
-            "M30" => 60 * (int)TimeFrameScale.M30,
-            "H1" => 60 * (int)TimeFrameScale.H1,
-            "H4" => 60 * (int)TimeFrameScale.H4,
-            "Daily" => 60 * (int)TimeFrameScale.Daily,
-            _ => 0
-        };
-
-        if (secondsPerCandle != 0)
-            return;
-
-        if (!int.TryParse(Regex.Match(timeFrame, @"\d{1,}$").Value, out var period))
-            return;
-
-        if (timeFrame.Contains('M'))
-        {
-            secondsPerCandle = 60 * (int)TimeFrameScale.M1 * period;
-            return;
-        }
-
-        if (timeFrame.Contains('H'))
-        {
-            secondsPerCandle = 60 * (int)TimeFrameScale.Daily * period;
-            return;
-        }
-
-        if (timeFrame.Contains('D'))
-            secondsPerCandle = 60 * (int)TimeFrameScale.Daily * period;
     }
 
     private Color GetColorTransparency(Color color, int tr = 5) => Color.FromArgb((byte)(tr * 25), color.R, color.G, color.B);
