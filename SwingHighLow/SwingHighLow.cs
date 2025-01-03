@@ -336,8 +336,6 @@ public class SwingHighLow : Indicator
                 break;
         }
 
-        var numberBars = (timeFrameObj.SecondsPerTframe / 60) * swingPeriod - 1;
-
         if (isSwingHigh)
             AddNewLevel(timeFrameObj.swingSignals, centerCandle.HighBar, centerCandle.High, SwingType.High);
         if (isSwingLow)
