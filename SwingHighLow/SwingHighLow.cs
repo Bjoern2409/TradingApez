@@ -103,8 +103,7 @@ public class SwingHighLow : Indicator
         private readonly Func<int, bool> IsNewSession;
         private readonly Func<int, IndicatorCandle> GetCandle;
 
-        internal readonly List<Signal> upperSignals = [];
-        internal readonly List<Signal> lowerSignals = [];
+        internal readonly List<Signal> swingSignals = [];
         private bool isNewPeriod;
 
         internal TFPeriod this[int index]
@@ -198,8 +197,7 @@ public class SwingHighLow : Indicator
     private readonly PenSettings swingHighColor = new() { Color = DefaultColors.Green.Convert() };
     private readonly PenSettings swingLowColor = new() { Color = DefaultColors.Red.Convert() };
 
-    internal readonly List<Signal> upperSignals = [];
-    internal readonly List<Signal> lowerSignals = [];
+    internal readonly List<Signal> swingSignals = [];
 
     #endregion
 
@@ -303,39 +301,27 @@ public class SwingHighLow : Indicator
     {
         GetCandleSeconds();
         timeFrameObj = new(Timeframe, IsNewSession, GetCandle);
-        upperSignals.Clear();
-        lowerSignals.Clear();
+        swingSignals.Clear();
     }
 
     protected override void OnCalculate(int bar, decimal value)
     {
-        var currentCandle = GetCandle(bar);
-
         if (isFixedTimeFrame)
         {
             TimeFrameSwings(bar);
-            TryCloseLine(bar, currentCandle, timeFrameObj.upperSignals, timeFrameObj.lowerSignals);
+            TryCloseLine(timeFrameObj.swingSignals, bar);
         }
 
         CurrentChartSwings(bar);
-        TryCloseLine(bar, currentCandle, upperSignals, lowerSignals);
+        TryCloseLine(swingSignals, bar);
     }
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
-        if (ChartInfo is null) 
-            return;
-
         if (timeframe == TimeFrameScale.Chart)
-        {
-            DrawSwingLines(context, upperSignals);
-            DrawSwingLines(context, lowerSignals);
-        }
-        else
-        {
-            DrawSwingLines(context, timeFrameObj.upperSignals);
-            DrawSwingLines(context, timeFrameObj.lowerSignals);
-        }
+            DrawSwingLines(context, swingSignals);
+        else        
+            DrawSwingLines(context, timeFrameObj.swingSignals);        
     }
 
     #endregion
@@ -372,9 +358,9 @@ public class SwingHighLow : Indicator
         }
 
         if (isSwingHigh)
-            CreateNewLine(upperSignals, bar - swingPeriod, centerCandle.High, SwingType.High);
+            CreateNewLine(swingSignals, bar - swingPeriod, centerCandle.High, SwingType.High);
         if (isSwingLow)
-            CreateNewLine(lowerSignals, bar - swingPeriod, centerCandle.Low, SwingType.Low);
+            CreateNewLine(swingSignals, bar - swingPeriod, centerCandle.Low, SwingType.Low);
     }
 
     private void TimeFrameSwings(int bar)
@@ -412,9 +398,9 @@ public class SwingHighLow : Indicator
         }
 
         if (isSwingHigh)
-            CreateNewLine(timeFrameObj.upperSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
+            CreateNewLine(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.High, SwingType.High);
         if (isSwingLow)
-            CreateNewLine(timeFrameObj.lowerSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
+            CreateNewLine(timeFrameObj.swingSignals, bar - (swingPeriod - 1), centerCandle.Low, SwingType.Low);
     }
 
     private void CreateNewLine(List<Signal> swingSignals, int bar, decimal priceLevel, SwingType swingType)
@@ -429,29 +415,22 @@ public class SwingHighLow : Indicator
         swingSignals.Add(signal);
     }
 
-    private void TryCloseLine(int bar, IndicatorCandle candle, List<Signal> upperSignals, List<Signal> lowerSignals)
+    private void TryCloseLine(List<Signal> swingSignals, int bar)
     {
-        foreach (var signal in upperSignals)
+        var candle = GetCandle(bar);
+
+        foreach (var signal in swingSignals)
         {
             if (signal.EndBar > 0)
                 continue;
 
-            if (candle.High >= signal.PriceLevel)
+            if (signal.SignalType == SwingType.High && candle.High >= signal.PriceLevel)
+                signal.EndBar = bar;
+            else if (signal.SignalType == SwingType.Low && candle.Low <= signal.PriceLevel)
                 signal.EndBar = bar;
         }
 
-        upperSignals.RemoveAll(s => bar - s.StartBar > lookbackPeriod);
-
-        foreach (var signal in lowerSignals)
-        {
-            if (signal.EndBar > 0)
-                continue;
-
-            if (candle.Low <= signal.PriceLevel)
-                signal.EndBar = bar;
-        }
-
-        lowerSignals.RemoveAll(s => bar - s.StartBar > lookbackPeriod);
+        swingSignals.RemoveAll(s => bar - s.StartBar > lookbackPeriod);
     }
 
     private void DrawSwingLines(RenderContext context, List<Signal> swingSignals)
